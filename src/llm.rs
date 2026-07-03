@@ -1,10 +1,11 @@
+use std::collections::VecDeque;
+use std::sync::Mutex;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::mock::SequenceMock;
 use crate::provider::IOProvider;
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -70,28 +71,35 @@ pub struct LlmRequest {
 /// # });
 /// ```
 pub struct MockLlm {
-    inner: SequenceMock<LlmRequest, String>,
+    responses: Mutex<VecDeque<String>>,
+    requests: Mutex<Vec<LlmRequest>>,
 }
 
 impl MockLlm {
     pub fn new(responses: Vec<String>) -> Self {
         Self {
-            inner: SequenceMock::new(responses),
+            responses: Mutex::new(responses.into()),
+            requests: Mutex::new(Vec::new()),
         }
     }
 
     pub fn requests(&self) -> Vec<LlmRequest> {
-        self.inner.inputs()
+        self.requests.lock().unwrap().clone()
     }
 
     pub fn remaining(&self) -> usize {
-        self.inner.remaining()
+        self.responses.lock().unwrap().len()
     }
 }
 
 #[async_trait]
 impl IOProvider<LlmRequest, String> for MockLlm {
     async fn invoke(&self, input: LlmRequest) -> Result<String> {
-        self.inner.invoke(input).await
+        self.requests.lock().unwrap().push(input);
+        self.responses
+            .lock()
+            .unwrap()
+            .pop_front()
+            .ok_or_else(|| anyhow!("MockLlm exhausted"))
     }
 }
