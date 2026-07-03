@@ -1,0 +1,21 @@
+[package]
+name = "servyi-ioprovider"
+version = "0.1.0"
+edition = "2021"
+description = "Generic IOProvider trait and mock implementations for LLMs, commands, and file systems"
+license = "MIT"
+
+[dependencies]
+async-trait = "0.1"
+anyhow = "1"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+dashmap = "6"
+
+[features]
+default = ["serde"]
+serde = ["dep:serde", "dep:serde_json"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+tokio-test = "0.4"
