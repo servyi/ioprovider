@@ -9,12 +9,10 @@ license = "MIT"
 async-trait = "0.1"
 anyhow = "1"
 serde = { version = "1", features = ["derive"], optional = true }
-serde_json = { version = "1", optional = true }
-dashmap = "6"
 
 [features]
 default = ["serde"]
-serde = ["dep:serde", "dep:serde_json"]
+serde = ["dep:serde"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

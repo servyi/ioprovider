@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
@@ -20,7 +20,7 @@ pub struct CommandRequest {
 
 /// Result of executing a command.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CommandResult {
     pub stdout: String,
     pub stderr: String,
@@ -54,7 +54,7 @@ impl CommandResult {
 /// # });
 /// ```
 pub struct MockCommand {
-    by_program: Arc<Mutex<HashMap<String, Vec<CommandResult>>>>,
+    by_program: Arc<Mutex<HashMap<String, VecDeque<CommandResult>>>>,
     inputs: Arc<Mutex<Vec<CommandRequest>>>,
 }
 
@@ -74,7 +74,7 @@ impl MockCommand {
             .unwrap()
             .entry(program.to_string())
             .or_default()
-            .push(result);
+            .push_back(result);
     }
 
     pub fn requests(&self) -> Vec<CommandRequest> {
@@ -95,7 +95,7 @@ impl IOProvider<CommandRequest, CommandResult> for MockCommand {
         self.inputs.lock().unwrap().push(input);
         let mut map = self.by_program.lock().unwrap();
         match map.get_mut(&program) {
-            Some(queue) if !queue.is_empty() => Ok(queue.remove(0)),
+            Some(queue) if !queue.is_empty() => Ok(queue.pop_front().unwrap()),
             _ => Err(anyhow!("MockCommand: no response configured for '{program}'")),
         }
     }

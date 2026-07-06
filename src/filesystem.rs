@@ -93,12 +93,13 @@ impl IOProvider<FsRequest, FsResult> for MockFileSystem {
                 Ok(FsResult::Removed)
             }
             FsRequest::ListDir { path } => {
-                let entries: Vec<PathBuf> = files
-                    .keys()
-                    .filter(|p| p.starts_with(&path))
-                    .cloned()
-                    .collect();
-                Ok(FsResult::Entries(entries))
+                        let mut entries: Vec<PathBuf> = files
+                            .keys()
+                            .filter(|p| p.starts_with(&path))
+                            .cloned()
+                            .collect();
+                        entries.sort();
+                        Ok(FsResult::Entries(entries))
             }
         }
     }
