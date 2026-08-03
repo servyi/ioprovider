@@ -6,7 +6,7 @@ use async_trait::async_trait;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::provider::IOProvider;
+use crate::provider::{fuzz_pick, FuzzerState, Fuzz, IOProvider};
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -101,5 +101,28 @@ impl IOProvider<LlmRequest, String> for MockLlm {
             .unwrap()
             .pop_front()
             .ok_or_else(|| anyhow!("MockLlm exhausted"))
+    }
+}
+
+impl Fuzz<String> for MockLlm {
+    /// Generates a plausible LLM response.
+    /// If responses are still queued, returns the next one.
+    /// Otherwise generates a short random response.
+    fn fuzz(&self, state: &mut dyn FuzzerState) -> String {
+        if let Some(resp) = self.responses.lock().unwrap().pop_front() {
+            return resp;
+        }
+        // Generate a plausible-looking response
+        let templates = [
+            "REASONABLE",
+            "The verification is correct.",
+            "The formula is too complex.",
+            "Found a potential issue with the invariant.",
+        ];
+        if state.gen_bool() {
+            fuzz_pick(state, &templates).to_string()
+        } else {
+            state.gen_string(200)
+        }
     }
 }

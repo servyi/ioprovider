@@ -7,7 +7,7 @@ use async_trait::async_trait;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::provider::IOProvider;
+use crate::provider::{FuzzerState, Fuzz, IOProvider};
 
 /// File system operation request.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -65,6 +65,21 @@ impl MockFileSystem {
 
     pub fn get(&self, path: &PathBuf) -> Option<String> {
         self.files.lock().unwrap().get(path).cloned()
+    }
+}
+
+impl Fuzz<FsResult> for MockFileSystem {
+    /// Generates a plausible filesystem result.
+    /// Returns content for reads, entries for listings, and ack for writes.
+    fn fuzz(&self, state: &mut dyn FuzzerState) -> FsResult {
+        let roll = state.gen_range(0, 5);
+        match roll {
+            0 => FsResult::Content(state.gen_string(500)),
+            1 => FsResult::Written,
+            2 => FsResult::Exists(state.gen_bool()),
+            3 => FsResult::Removed,
+            _ => FsResult::Entries(Vec::new()),
+        }
     }
 }
 

@@ -6,7 +6,7 @@ use async_trait::async_trait;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::provider::IOProvider;
+use crate::provider::{FuzzerState, Fuzz, IOProvider};
 
 /// A command execution request (e.g., running a solver, a script, or any CLI tool).
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -97,6 +97,27 @@ impl IOProvider<CommandRequest, CommandResult> for MockCommand {
         match map.get_mut(&program) {
             Some(queue) if !queue.is_empty() => Ok(queue.pop_front().unwrap()),
             _ => Err(anyhow!("MockCommand: no response configured for '{program}'")),
+        }
+    }
+}
+
+impl Fuzz<CommandResult> for MockCommand {
+    /// Generates a plausible command result.
+    /// For solvers (z3): returns SAT/UNSAT/UNKNOWN.
+    /// For other commands: returns success with random output.
+    fn fuzz(&self, state: &mut dyn FuzzerState) -> CommandResult {
+        let roll = state.gen_range(0, 10);
+        if roll < 6 {
+            // Success — most commands succeed most of the time
+            let outputs = ["unsat\n", "sat\n", "unknown\n", "(model)\n", "ok\n"];
+            let idx = state.gen_range(0, outputs.len());
+            CommandResult::success(outputs[idx])
+        } else if roll < 9 {
+            // Failure with stderr
+            CommandResult::failure("error: something went wrong", 1)
+        } else {
+            // Timeout-like failure
+            CommandResult::failure("timeout", 124)
         }
     }
 }
