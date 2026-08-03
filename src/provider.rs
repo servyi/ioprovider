@@ -77,9 +77,9 @@ impl FuzzerState for SimpleFuzzerState {
 /// Trait for generating realistic fake outputs for fuzzing state machines.
 ///
 /// Implement this alongside `IOProvider<I, O>` to enable automatic fuzzing
-/// of state machines without real I/O. The `fuzz` method should produce
-/// outputs that are structurally valid for `O` — realistic enough that the
-/// state machine can process them without panicking on malformed data.
-pub trait Fuzz<O> {
-    fn fuzz(&self, state: &mut dyn FuzzerState) -> O;
+/// of state machines without real I/O. The `fuzz` method receives the input
+/// that would have been passed to `invoke`, so it can generate contextually
+/// appropriate outputs.
+pub trait Fuzz<I, O> {
+    fn fuzz(&self, input: &I, state: &mut dyn FuzzerState) -> O;
 }

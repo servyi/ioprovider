@@ -101,23 +101,42 @@ impl IOProvider<CommandRequest, CommandResult> for MockCommand {
     }
 }
 
-impl Fuzz<CommandResult> for MockCommand {
-    /// Generates a plausible command result.
-    /// For solvers (z3): returns SAT/UNSAT/UNKNOWN.
-    /// For other commands: returns success with random output.
-    fn fuzz(&self, state: &mut dyn FuzzerState) -> CommandResult {
-        let roll = state.gen_range(0, 10);
-        if roll < 6 {
-            // Success — most commands succeed most of the time
-            let outputs = ["unsat\n", "sat\n", "unknown\n", "(model)\n", "ok\n"];
-            let idx = state.gen_range(0, outputs.len());
-            CommandResult::success(outputs[idx])
-        } else if roll < 9 {
-            // Failure with stderr
-            CommandResult::failure("error: something went wrong", 1)
-        } else {
-            // Timeout-like failure
-            CommandResult::failure("timeout", 124)
+impl Fuzz<CommandRequest, CommandResult> for MockCommand {
+    /// Generates a plausible command result based on the program and input.
+    fn fuzz(&self, input: &CommandRequest, state: &mut dyn FuzzerState) -> CommandResult {
+        let program = input.program.as_str();
+
+        match program {
+            "z3" | "cvc5" | "yices" => {
+                // Solver: look at the formula to decide SAT/UNSAT/UNKNOWN
+                let formula = input.stdin.as_deref().unwrap_or("");
+                if formula.contains("(check-sat)") {
+                    let roll = state.gen_range(0, 10);
+                    match roll {
+                        0..=3 => CommandResult::success("unsat\n"),
+                        4..=6 => CommandResult::success("sat\n"),
+                        _ => CommandResult::success("unknown\n"),
+                    }
+                } else {
+                    CommandResult::success("ok\n")
+                }
+            }
+            "python3" | "python" => {
+                // Python: usually succeeds, sometimes syntax error
+                if state.gen_range(0, 10) < 8 {
+                    CommandResult::success("(check-sat)\n")
+                } else {
+                    CommandResult::failure("SyntaxError", 1)
+                }
+            }
+            _ => {
+                // Generic command
+                if state.gen_range(0, 10) < 7 {
+                    CommandResult::success("ok\n")
+                } else {
+                    CommandResult::failure("error", 1)
+                }
+            }
         }
     }
 }

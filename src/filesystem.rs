@@ -68,17 +68,26 @@ impl MockFileSystem {
     }
 }
 
-impl Fuzz<FsResult> for MockFileSystem {
-    /// Generates a plausible filesystem result.
-    /// Returns content for reads, entries for listings, and ack for writes.
-    fn fuzz(&self, state: &mut dyn FuzzerState) -> FsResult {
-        let roll = state.gen_range(0, 5);
-        match roll {
-            0 => FsResult::Content(state.gen_string(500)),
-            1 => FsResult::Written,
-            2 => FsResult::Exists(state.gen_bool()),
-            3 => FsResult::Removed,
-            _ => FsResult::Entries(Vec::new()),
+impl Fuzz<FsRequest, FsResult> for MockFileSystem {
+    /// Generates a plausible filesystem result based on the request type.
+    fn fuzz(&self, input: &FsRequest, state: &mut dyn FuzzerState) -> FsResult {
+        match input {
+            FsRequest::Read { path } => {
+                // If the file exists in our mock store, return it; otherwise random content
+                let files = self.files.lock().unwrap();
+                if let Some(content) = files.get(path) {
+                    FsResult::Content(content.clone())
+                } else if state.gen_bool() {
+                    FsResult::Content(state.gen_string(500))
+                } else {
+                    // Simulate file not found
+                    FsResult::Content("// file not found".to_string())
+                }
+            }
+            FsRequest::Write { .. } => FsResult::Written,
+            FsRequest::Exists { .. } => FsResult::Exists(state.gen_bool()),
+            FsRequest::Remove { .. } => FsResult::Removed,
+            FsRequest::ListDir { .. } => FsResult::Entries(Vec::new()),
         }
     }
 }
