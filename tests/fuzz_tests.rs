@@ -110,3 +110,37 @@ fn test_fuzz_provider_drop_in() {
     let response = rt.block_on(provider.invoke(req)).unwrap();
     assert!(!response.is_empty());
 }
+
+#[test]
+fn test_stream_cursor_advances() {
+    use servyi_ioprovider::FuzzData;
+    use std::sync::Arc;
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    let stream: Arc<std::sync::Mutex<FuzzData>> = servyi_ioprovider::fuzz_stream_from_seed(99);
+    let llm = FuzzProvider::with_stream(MockLlm::new(vec![]), Arc::clone(&stream));
+    let cmd = FuzzProvider::with_stream(MockCommand::new(), Arc::clone(&stream));
+
+    let req = LlmRequest {
+        model: "test".into(),
+        messages: vec![LlmMessage::user("Produce SMT-LIB2 formulas in smt2 blocks")],
+    };
+    rt.block_on(llm.invoke(req)).unwrap();
+    let pos_after_llm = stream.lock().unwrap().pos();
+    assert!(pos_after_llm > 0, "cursor must advance after an invoke");
+
+    let creq = CommandRequest {
+        program: "z3".into(),
+        args: vec![],
+        stdin: Some("(check-sat)".into()),
+        working_dir: None,
+    };
+    rt.block_on(cmd.invoke(creq)).unwrap();
+    let pos_after_cmd = stream.lock().unwrap().pos();
+    assert!(
+        pos_after_cmd > pos_after_llm,
+        "second provider must consume from the same shared stream"
+    );
+}
+
