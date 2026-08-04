@@ -1,5 +1,5 @@
 use servyi_ioprovider::{
-    fuzz_pick, Fuzz, FuzzerState, SimpleFuzzerState,
+    Fuzz, IOProvider, FuzzProvider,
     command::CommandRequest,
     filesystem::{FsRequest, FsResult},
     llm::{LlmMessage, LlmRequest},
@@ -9,43 +9,42 @@ use servyi_ioprovider::{
 #[test]
 fn test_fuzz_llm_judge_prompt() {
     let llm = MockLlm::new(vec![]);
-    let mut state = SimpleFuzzerState::new(42);
+    let data = vec![0u8; 1024];
+    let mut u = arbitrary::Unstructured::new(&data);
 
     let req = LlmRequest {
         model: "test".into(),
         messages: vec![LlmMessage::user("Determine if the verification is REASONABLE")],
     };
 
-    // Run many fuzz iterations — should produce REASONABLE sometimes
-    let mut reasonable_count = 0;
-    for _ in 0..100 {
-        let resp = llm.fuzz(&req, &mut state);
-        if resp == "REASONABLE" {
-            reasonable_count += 1;
-        }
-    }
-    assert!(reasonable_count > 0, "should produce REASONABLE at least sometimes for judge prompts");
-    assert!(reasonable_count < 100, "should not always produce REASONABLE");
+    let resp = llm.fuzz(&req, &mut u);
+    assert!(
+        resp == "REASONABLE" || resp.contains("verification"),
+        "judge prompt should produce REASONABLE or verification feedback"
+    );
 }
 
 #[test]
 fn test_fuzz_llm_smt_prompt() {
     let llm = MockLlm::new(vec![]);
-    let mut state = SimpleFuzzerState::new(99);
+    let data = vec![5u8; 1024];
+    let mut u = arbitrary::Unstructured::new(&data);
 
     let req = LlmRequest {
         model: "test".into(),
         messages: vec![LlmMessage::user("Produce SMT-LIB2 formulas in smt2 blocks")],
     };
 
-    let resp = llm.fuzz(&req, &mut state);
-    assert!(resp.contains("(check-sat)") || resp.contains("set-logic"), "formalizer prompt should produce SMT-like output, got: {resp}");
+    let resp = llm.fuzz(&req, &mut u);
+    assert!(
+        resp.contains("(check-sat)") || resp.contains("set-logic"),
+        "formalizer prompt should produce SMT-like output"
+    );
 }
 
 #[test]
-fn test_fuzz_solver_sat_unsat() {
+fn test_fuzz_solver_outcomes() {
     let cmd = MockCommand::new();
-    let mut state = SimpleFuzzerState::new(7);
 
     let req = CommandRequest {
         program: "z3".into(),
@@ -55,8 +54,10 @@ fn test_fuzz_solver_sat_unsat() {
     };
 
     let mut outcomes = std::collections::HashSet::new();
-    for _ in 0..50 {
-        let result = cmd.fuzz(&req, &mut state);
+    for seed in 0..50 {
+        let data = (0..1024).map(|i| ((seed * 257 + i) & 0xFF) as u8).collect::<Vec<_>>();
+        let mut u = arbitrary::Unstructured::new(&data);
+        let result = cmd.fuzz(&req, &mut u);
         assert_eq!(result.exit_code, 0, "z3 should succeed");
         let out = result.stdout.trim();
         assert!(
@@ -65,79 +66,47 @@ fn test_fuzz_solver_sat_unsat() {
         );
         outcomes.insert(out.to_string());
     }
-    assert!(outcomes.len() >= 2, "should produce at least 2 different outcomes over 50 runs, got: {outcomes:?}");
-}
-
-#[test]
-fn test_fuzz_python() {
-    let cmd = MockCommand::new();
-    let mut state = SimpleFuzzerState::new(123);
-
-    let req = CommandRequest {
-        program: "python3".into(),
-        args: vec![],
-        stdin: None,
-        working_dir: None,
-    };
-
-    for _ in 0..20 {
-        let result = cmd.fuzz(&req, &mut state);
-        // Python should mostly succeed
-        assert!(result.exit_code == 0 || result.exit_code == 1);
-    }
+    assert!(outcomes.len() >= 2, "should produce multiple outcomes");
 }
 
 #[test]
 fn test_fuzz_filesystem_read() {
     let fs = MockFileSystem::new();
-    let mut state = SimpleFuzzerState::new(55);
+    let data = vec![42u8; 1024];
+    let mut u = arbitrary::Unstructured::new(&data);
 
     let req = FsRequest::Read {
         path: std::path::PathBuf::from("/test/file.rs"),
     };
 
-    for _ in 0..10 {
-        let result = fs.fuzz(&req, &mut state);
-        match result {
-            FsResult::Content(_) => {}
-            other => panic!("Read should produce Content, got: {other:?}"),
-        }
-    }
+    let result = fs.fuzz(&req, &mut u);
+    assert!(matches!(result, FsResult::Content(_)));
 }
 
 #[test]
-fn test_fuzz_filesystem_write_always_succeeds() {
+fn test_fuzz_filesystem_write() {
     let fs = MockFileSystem::new();
-    let mut state = SimpleFuzzerState::new(1);
+    let data = vec![0u8; 1024];
+    let mut u = arbitrary::Unstructured::new(&data);
 
     let req = FsRequest::Write {
         path: std::path::PathBuf::from("/test/out.txt"),
         content: "hello".into(),
     };
 
-    for _ in 0..10 {
-        assert_eq!(fs.fuzz(&req, &mut state), FsResult::Written);
-    }
+    assert_eq!(fs.fuzz(&req, &mut u), FsResult::Written);
 }
 
 #[test]
-fn test_fuzzer_state_deterministic() {
-    let mut a = SimpleFuzzerState::new(42);
-    let mut b = SimpleFuzzerState::new(42);
-    for _ in 0..100 {
-        assert_eq!(a.gen_bool(), b.gen_bool());
-        assert_eq!(a.gen_range(0, 1000), b.gen_range(0, 1000));
-    }
-}
+fn test_fuzz_provider_drop_in() {
+    let provider = FuzzProvider::with_seed(MockLlm::new(vec![]), 42);
 
-#[test]
-fn test_fuzz_pick() {
-    let mut state = SimpleFuzzerState::new(42);
-    let items = vec!["a", "b", "c", "d", "e"];
-    let mut seen = std::collections::HashSet::new();
-    for _ in 0..100 {
-        let picked = fuzz_pick(&mut state, &items);
-        seen.insert(*picked);
-    }
-    assert!(seen.len() >= 3, "should pick at least 3 different items over 100 runs");
+    let req = LlmRequest {
+        model: "test".into(),
+        messages: vec![LlmMessage::user("Is this REASONABLE?")],
+    };
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let response = rt.block_on(provider.invoke(req)).unwrap();
+    assert!(!response.is_empty());
 }

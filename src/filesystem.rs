@@ -7,7 +7,7 @@ use async_trait::async_trait;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::provider::{FuzzerState, Fuzz, IOProvider};
+use crate::provider::{Fuzz, IOProvider};
 
 /// File system operation request.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -69,23 +69,21 @@ impl MockFileSystem {
 }
 
 impl Fuzz<FsRequest, FsResult> for MockFileSystem {
-    /// Generates a plausible filesystem result based on the request type.
-    fn fuzz(&self, input: &FsRequest, state: &mut dyn FuzzerState) -> FsResult {
+    fn fuzz(&self, input: &FsRequest, u: &mut arbitrary::Unstructured) -> FsResult {
         match input {
             FsRequest::Read { path } => {
-                // If the file exists in our mock store, return it; otherwise random content
                 let files = self.files.lock().unwrap();
                 if let Some(content) = files.get(path) {
                     FsResult::Content(content.clone())
-                } else if state.gen_bool() {
-                    FsResult::Content(state.gen_string(500))
+                } else if u.arbitrary().unwrap_or(true) {
+                    let bytes = u.bytes(100).unwrap_or(&[]);
+                    FsResult::Content(String::from_utf8_lossy(bytes).to_string())
                 } else {
-                    // Simulate file not found
                     FsResult::Content("// file not found".to_string())
                 }
             }
             FsRequest::Write { .. } => FsResult::Written,
-            FsRequest::Exists { .. } => FsResult::Exists(state.gen_bool()),
+            FsRequest::Exists { .. } => FsResult::Exists(u.arbitrary().unwrap_or(false)),
             FsRequest::Remove { .. } => FsResult::Removed,
             FsRequest::ListDir { .. } => FsResult::Entries(Vec::new()),
         }

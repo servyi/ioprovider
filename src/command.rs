@@ -6,7 +6,7 @@ use async_trait::async_trait;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::provider::{FuzzerState, Fuzz, IOProvider};
+use crate::provider::{Fuzz, IOProvider};
 
 /// A command execution request (e.g., running a solver, a script, or any CLI tool).
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -102,17 +102,12 @@ impl IOProvider<CommandRequest, CommandResult> for MockCommand {
 }
 
 impl Fuzz<CommandRequest, CommandResult> for MockCommand {
-    /// Generates a plausible command result based on the program and input.
-    fn fuzz(&self, input: &CommandRequest, state: &mut dyn FuzzerState) -> CommandResult {
-        let program = input.program.as_str();
-
-        match program {
+    fn fuzz(&self, input: &CommandRequest, u: &mut arbitrary::Unstructured) -> CommandResult {
+        match input.program.as_str() {
             "z3" | "cvc5" | "yices" => {
-                // Solver: look at the formula to decide SAT/UNSAT/UNKNOWN
                 let formula = input.stdin.as_deref().unwrap_or("");
                 if formula.contains("(check-sat)") {
-                    let roll = state.gen_range(0, 10);
-                    match roll {
+                    match u.int_in_range(0u8..=9).unwrap_or(5) {
                         0..=3 => CommandResult::success("unsat\n"),
                         4..=6 => CommandResult::success("sat\n"),
                         _ => CommandResult::success("unknown\n"),
@@ -122,16 +117,14 @@ impl Fuzz<CommandRequest, CommandResult> for MockCommand {
                 }
             }
             "python3" | "python" => {
-                // Python: usually succeeds, sometimes syntax error
-                if state.gen_range(0, 10) < 8 {
+                if u.int_in_range(0u8..=9).unwrap_or(0) < 8 {
                     CommandResult::success("(check-sat)\n")
                 } else {
                     CommandResult::failure("SyntaxError", 1)
                 }
             }
             _ => {
-                // Generic command
-                if state.gen_range(0, 10) < 7 {
+                if u.int_in_range(0u8..=9).unwrap_or(0) < 7 {
                     CommandResult::success("ok\n")
                 } else {
                     CommandResult::failure("error", 1)

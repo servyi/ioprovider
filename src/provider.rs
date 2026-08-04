@@ -1,4 +1,7 @@
+use std::marker::PhantomData;
+
 use anyhow::Result;
+use arbitrary::Unstructured;
 use async_trait::async_trait;
 
 /// The core trait: a provider that takes input `I` and produces output `O`.
@@ -10,76 +13,71 @@ pub trait IOProvider<I, O>: Send + Sync {
     async fn invoke(&self, input: I) -> Result<O>;
 }
 
-/// Random data source for fuzzing.
-///
-/// Provides primitives that fuzz implementations use to generate
-/// realistic-looking outputs without external interaction.
-pub trait FuzzerState {
-    fn gen_bool(&mut self) -> bool;
-    fn gen_u8(&mut self) -> u8;
-    fn gen_range(&mut self, min: usize, max: usize) -> usize;
-    fn gen_string(&mut self, max_len: usize) -> String;
-}
-
-/// Pick a random element from a slice.
-pub fn fuzz_pick<'a, T>(state: &mut dyn FuzzerState, items: &'a [T]) -> &'a T {
-    &items[state.gen_range(0, items.len())]
-}
-
-/// Simple PRNG-based FuzzerState for testing.
-pub struct SimpleFuzzerState {
-    seed: u64,
-}
-
-impl SimpleFuzzerState {
-    pub fn new(seed: u64) -> Self {
-        Self { seed }
-    }
-
-    fn next(&mut self) -> u64 {
-        // xorshift64
-        let mut x = self.seed;
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        self.seed = x;
-        x
-    }
-}
-
-impl FuzzerState for SimpleFuzzerState {
-    fn gen_bool(&mut self) -> bool {
-        self.next() & 1 == 1
-    }
-
-    fn gen_u8(&mut self) -> u8 {
-        self.next() as u8
-    }
-
-    fn gen_range(&mut self, min: usize, max: usize) -> usize {
-        if min >= max {
-            return min;
-        }
-        min + (self.next() as usize % (max - min))
-    }
-
-    fn gen_string(&mut self, max_len: usize) -> String {
-        let len = self.gen_range(0, max_len);
-        (0..len)
-            .map(|_| {
-                let n = self.gen_range(32, 127); // printable ASCII
-                char::from_u32(n as u32).unwrap_or(' ')
-            })
-            .collect()
-    }
-}
-
 /// Trait for generating realistic fake outputs for fuzzing state machines.
 ///
 /// Implement this alongside `IOProvider<I, O>` to enable automatic fuzzing
 /// of state machines without real I/O. The `fuzz` method receives the input
 /// that would have been passed to `invoke`, so it can generate contextually
 /// appropriate outputs.
-pub trait Fuzz<I, O> {
-    fn fuzz(&self, input: &I, state: &mut dyn FuzzerState) -> O;
+///
+/// Uses `arbitrary::Unstructured` (same backend as `cargo-fuzz`) as the
+/// random data source.
+pub trait Fuzz<I, O>: Send + Sync {
+    fn fuzz(&self, input: &I, u: &mut Unstructured) -> O;
+}
+
+/// Drop-in fuzzing wrapper: implements `IOProvider<I, O>` by calling
+/// the inner `Fuzz<I, O>` implementation.
+///
+/// ```
+/// use servyi_ioprovider::{FuzzProvider, IOProvider, MockLlm, llm::{LlmRequest, LlmMessage}};
+///
+/// # tokio_test::block_on(async {
+/// let provider = FuzzProvider::with_seed(MockLlm::new(vec![]), 42);
+/// let req = LlmRequest {
+///     model: "test".into(),
+///     messages: vec![LlmMessage::user("Is this REASONABLE?")],
+/// };
+/// // provider implements IOProvider<LlmRequest, String> — drop-in replacement
+/// let response = provider.invoke(req).await.unwrap();
+/// assert!(!response.is_empty());
+/// # });
+/// ```
+pub struct FuzzProvider<F, I, O> {
+    fuzz: F,
+    data: std::sync::Mutex<Vec<u8>>,
+    _phantom: PhantomData<fn(I) -> O>,
+}
+
+impl<F, I, O> FuzzProvider<F, I, O>
+where
+    F: Fuzz<I, O>,
+{
+    pub fn new(fuzz: F) -> Self {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let data = (0..1024).map(|i| ((seed + i) & 0xFF) as u8).collect();
+        Self { fuzz, data: std::sync::Mutex::new(data), _phantom: PhantomData }
+    }
+
+    pub fn with_seed(fuzz: F, seed: u64) -> Self {
+        let data = (0..1024).map(|i| ((seed.wrapping_mul(6364136223846793005).wrapping_add(i as u64)) >> 33) as u8).collect();
+        Self { fuzz, data: std::sync::Mutex::new(data), _phantom: PhantomData }
+    }
+}
+
+#[async_trait]
+impl<F, I, O> IOProvider<I, O> for FuzzProvider<F, I, O>
+where
+    F: Fuzz<I, O>,
+    I: Send + Sync + 'static,
+    O: Send + 'static,
+{
+    async fn invoke(&self, input: I) -> Result<O> {
+        let data = self.data.lock().unwrap().clone();
+        let mut u = Unstructured::new(&data);
+        Ok(self.fuzz.fuzz(&input, &mut u))
+    }
 }

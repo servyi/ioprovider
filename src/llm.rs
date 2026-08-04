@@ -6,7 +6,7 @@ use async_trait::async_trait;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::provider::{FuzzerState, Fuzz, IOProvider};
+use crate::provider::{Fuzz, IOProvider};
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -108,42 +108,38 @@ impl Fuzz<LlmRequest, String> for MockLlm {
     /// Generates a plausible LLM response based on the request.
     /// If responses are still queued, returns the next one.
     /// Otherwise generates a response that's plausible for the conversation context.
-    fn fuzz(&self, input: &LlmRequest, state: &mut dyn FuzzerState) -> String {
+    fn fuzz(&self, input: &LlmRequest, u: &mut arbitrary::Unstructured) -> String {
         if let Some(resp) = self.responses.lock().unwrap().pop_front() {
             return resp;
         }
 
-        // Analyze the last user message to generate a plausible response
         let last_user = input.messages.iter()
             .rev()
             .find(|m| m.role == LlmRole::User)
             .map(|m| m.content.as_str())
             .unwrap_or("");
 
-        // Check for keywords that hint at what kind of response is expected
         let lower = last_user.to_lowercase();
         if lower.contains("reasonable") || lower.contains("verify") {
-            // Judge-style prompt → likely REASONABLE
-            if state.gen_bool() {
+            if u.arbitrary().unwrap_or(true) {
                 "REASONABLE".to_string()
             } else {
                 "The verification has issues with formula precision.".to_string()
             }
         } else if lower.contains("smt") || lower.contains("formula") || lower.contains("smtlib") {
-            // Formalizer-style prompt → generate a simple SMT formula
             let formulas = [
                 "(set-logic ALL)\n(declare-const x Int)\n(assert (> x 0))\n(check-sat)\n",
                 "(set-logic ALL)\n(declare-const x Int)\n(assert (and (> x 0) (< x 100)))\n(check-sat)\n",
                 "(set-logic ALL)\n(check-sat)\n",
             ];
-            let idx = state.gen_range(0, formulas.len());
+            let idx = u.int_in_range(0..=formulas.len() - 1).unwrap_or(0);
             format!("```\n{}\n```", formulas[idx])
         } else if lower.contains("split") || lower.contains("piece") {
-            // Splitter-style prompt → generate piece markers
             "// Start point: test.rs:1\n// Handover point: test.rs:5\nreturn;\n".to_string()
         } else {
-            // Generic response
-            state.gen_string(200)
+            let len = u.int_in_range(0..=200usize).unwrap_or(50);
+            let bytes = u.bytes(len).unwrap_or(&[]);
+            String::from_utf8_lossy(bytes).to_string()
         }
     }
 }
