@@ -68,17 +68,28 @@ impl MockCommand {
 
     /// Configure a response for a given program name.
     /// Multiple calls queue responses in sequence for that program.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mock's internal state mutex was poisoned by a panicking
+    /// concurrent user of this mock.
     pub fn on_program(&mut self, program: &str, result: CommandResult) {
         self.by_program
             .lock()
-            .unwrap()
+            .expect("mock state mutex poisoned")
             .entry(program.to_string())
             .or_default()
             .push_back(result);
     }
 
+    /// Returns every request this mock received, in order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mock's internal state mutex was poisoned by a panicking
+    /// concurrent user of this mock.
     pub fn requests(&self) -> Vec<CommandRequest> {
-        self.inputs.lock().unwrap().clone()
+        self.inputs.lock().expect("mock state mutex poisoned").clone()
     }
 }
 
@@ -92,17 +103,22 @@ impl Default for MockCommand {
 impl IOProvider<CommandRequest, CommandResult> for MockCommand {
     async fn invoke(&self, input: CommandRequest) -> Result<CommandResult> {
         let program = input.program.clone();
-        self.inputs.lock().unwrap().push(input);
-        let mut map = self.by_program.lock().unwrap();
+        self.inputs
+            .lock()
+            .expect("mock state mutex poisoned")
+            .push(input);
+        let mut map = self.by_program.lock().expect("mock state mutex poisoned");
         match map.get_mut(&program) {
-            Some(queue) if !queue.is_empty() => Ok(queue.pop_front().unwrap()),
+            Some(queue) if !queue.is_empty() => {
+                Ok(queue.pop_front().expect("queue checked non-empty above"))
+            }
             _ => Err(anyhow!("MockCommand: no response configured for '{program}'")),
         }
     }
 }
 
 impl Fuzz<CommandRequest, CommandResult> for MockCommand {
-    fn fuzz(&self, input: &CommandRequest, u: &mut arbitrary::Unstructured) -> CommandResult {
+    fn fuzz(&self, input: &CommandRequest, u: &mut arbitrary::Unstructured<'_>) -> CommandResult {
         match input.program.as_str() {
             "z3" | "cvc5" | "yices" => {
                 let formula = input.stdin.as_deref().unwrap_or("");
