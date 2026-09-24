@@ -69,14 +69,11 @@ impl MockCommand {
     /// Configure a response for a given program name.
     /// Multiple calls queue responses in sequence for that program.
     ///
-    /// # Panics
-    ///
-    /// Panics if the mock's internal state mutex was poisoned by a panicking
     /// concurrent user of this mock.
     pub fn on_program(&mut self, program: &str, result: CommandResult) {
         self.by_program
             .lock()
-            .expect("mock state mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .entry(program.to_string())
             .or_default()
             .push_back(result);
@@ -84,12 +81,10 @@ impl MockCommand {
 
     /// Returns every request this mock received, in order.
     ///
-    /// # Panics
-    ///
-    /// Panics if the mock's internal state mutex was poisoned by a panicking
     /// concurrent user of this mock.
     pub fn requests(&self) -> Vec<CommandRequest> {
-        self.inputs.lock().expect("mock state mutex poisoned").clone()
+        self.inputs.lock()
+            .unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
@@ -105,9 +100,10 @@ impl IOProvider<CommandRequest, CommandResult> for MockCommand {
         let program = input.program.clone();
         self.inputs
             .lock()
-            .expect("mock state mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .push(input);
-        let mut map = self.by_program.lock().expect("mock state mutex poisoned");
+        let mut map = self.by_program.lock()
+            .unwrap_or_else(|e| e.into_inner());
         match map.get_mut(&program) {
             Some(queue) if !queue.is_empty() => {
                 Ok(queue.pop_front().expect("queue checked non-empty above"))

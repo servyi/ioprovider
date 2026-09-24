@@ -61,26 +61,21 @@ impl MockFileSystem {
 
     /// Adds or replaces a file in the mock file system.
     ///
-    /// # Panics
-    ///
-    /// Panics if the mock's internal state mutex was poisoned by a panicking
     /// concurrent user of this mock.
     pub fn insert(&mut self, path: impl Into<PathBuf>, content: impl Into<String>) {
         let _prev = self
             .files
             .lock()
-            .expect("mock state mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .insert(path.into(), content.into());
     }
 
     /// Returns the current content of a mocked file.
     ///
-    /// # Panics
-    ///
-    /// Panics if the mock's internal state mutex was poisoned by a panicking
     /// concurrent user of this mock.
     pub fn get(&self, path: &PathBuf) -> Option<String> {
-        self.files.lock().expect("mock state mutex poisoned").get(path).cloned()
+        self.files.lock()
+            .unwrap_or_else(|e| e.into_inner()).get(path).cloned()
     }
 }
 
@@ -88,7 +83,8 @@ impl Fuzz<FsRequest, FsResult> for MockFileSystem {
     fn fuzz(&self, input: &FsRequest, u: &mut arbitrary::Unstructured<'_>) -> FsResult {
         match input {
             FsRequest::Read { path } => {
-                let files = self.files.lock().expect("mock state mutex poisoned");
+                let files = self.files.lock()
+            .unwrap_or_else(|e| e.into_inner());
                 if let Some(content) = files.get(path) {
                     FsResult::Content(content.clone())
                 } else if u.arbitrary().unwrap_or(true) {
@@ -115,7 +111,8 @@ impl Default for MockFileSystem {
 #[async_trait]
 impl IOProvider<FsRequest, FsResult> for MockFileSystem {
     async fn invoke(&self, input: FsRequest) -> Result<FsResult> {
-        let mut files = self.files.lock().expect("mock state mutex poisoned");
+        let mut files = self.files.lock()
+            .unwrap_or_else(|e| e.into_inner());
         match input {
             FsRequest::Read { path } => files
                 .get(&path)

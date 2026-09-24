@@ -85,22 +85,18 @@ impl MockLlm {
 
     /// Returns every request this mock received, in order.
     ///
-    /// # Panics
-    ///
-    /// Panics if the mock's internal state mutex was poisoned by a panicking
     /// concurrent user of this mock.
     pub fn requests(&self) -> Vec<LlmRequest> {
-        self.requests.lock().expect("mock state mutex poisoned").clone()
+        self.requests.lock()
+            .unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Returns the number of queued responses not yet consumed.
     ///
-    /// # Panics
-    ///
-    /// Panics if the mock's internal state mutex was poisoned by a panicking
     /// concurrent user of this mock.
     pub fn remaining(&self) -> usize {
-        self.responses.lock().expect("mock state mutex poisoned").len()
+        self.responses.lock()
+            .unwrap_or_else(|e| e.into_inner()).len()
     }
 }
 
@@ -109,11 +105,11 @@ impl IOProvider<LlmRequest, String> for MockLlm {
     async fn invoke(&self, input: LlmRequest) -> Result<String> {
         self.requests
             .lock()
-            .expect("mock state mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .push(input);
         self.responses
             .lock()
-            .expect("mock state mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .pop_front()
             .ok_or_else(|| anyhow!("MockLlm exhausted"))
     }
@@ -125,7 +121,8 @@ impl Fuzz<LlmRequest, String> for MockLlm {
     /// Otherwise generates a response that's plausible for the conversation context.
     fn fuzz(&self, input: &LlmRequest, u: &mut arbitrary::Unstructured<'_>) -> String {
         if let Some(resp) =
-            self.responses.lock().expect("mock state mutex poisoned").pop_front()
+            self.responses.lock()
+            .unwrap_or_else(|e| e.into_inner()).pop_front()
         {
             return resp;
         }

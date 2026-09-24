@@ -184,7 +184,8 @@ where
     O: Send + 'static,
 {
     async fn invoke(&self, input: I) -> Result<O> {
-        let mut guard = self.stream.lock().expect("fuzz stream mutex poisoned");
+        let mut guard = self.stream.lock()
+            .unwrap_or_else(|e| e.into_inner());
         Ok(guard.draw(|u| self.fuzz.fuzz(&input, u)))
     }
 }
