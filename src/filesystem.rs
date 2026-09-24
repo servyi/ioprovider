@@ -52,6 +52,11 @@ pub struct MockFileSystem {
     files: Arc<Mutex<HashMap<PathBuf, String>>>,
 }
 
+// A poisoned lock means some other thread's test already panicked. The
+// critical sections only run single atomic collection ops (push / insert /
+// pop / clone / len) — nothing panics while holding the lock and the data
+// stays structurally valid — so recover it and let the failing test report
+// itself instead of raising a confusing secondary panic.
 impl MockFileSystem {
     pub fn new() -> Self {
         Self {
@@ -59,20 +64,28 @@ impl MockFileSystem {
         }
     }
 
+    /// Adds or replaces a file in the mock file system.
     pub fn insert(&mut self, path: impl Into<PathBuf>, content: impl Into<String>) {
-        self.files.lock().unwrap().insert(path.into(), content.into());
+        let _prev = self
+            .files
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(path.into(), content.into());
     }
 
+    /// Returns the current content of a mocked file.
     pub fn get(&self, path: &PathBuf) -> Option<String> {
-        self.files.lock().unwrap().get(path).cloned()
+        self.files.lock()
+            .unwrap_or_else(|e| e.into_inner()).get(path).cloned()
     }
 }
 
 impl Fuzz<FsRequest, FsResult> for MockFileSystem {
-    fn fuzz(&self, input: &FsRequest, u: &mut arbitrary::Unstructured) -> FsResult {
+    fn fuzz(&self, input: &FsRequest, u: &mut arbitrary::Unstructured<'_>) -> FsResult {
         match input {
             FsRequest::Read { path } => {
-                let files = self.files.lock().unwrap();
+                let files = self.files.lock()
+            .unwrap_or_else(|e| e.into_inner());
                 if let Some(content) = files.get(path) {
                     FsResult::Content(content.clone())
                 } else if u.arbitrary().unwrap_or(true) {
@@ -99,19 +112,20 @@ impl Default for MockFileSystem {
 #[async_trait]
 impl IOProvider<FsRequest, FsResult> for MockFileSystem {
     async fn invoke(&self, input: FsRequest) -> Result<FsResult> {
-        let mut files = self.files.lock().unwrap();
+        let mut files = self.files.lock()
+            .unwrap_or_else(|e| e.into_inner());
         match input {
             FsRequest::Read { path } => files
                 .get(&path)
                 .map(|c| FsResult::Content(c.clone()))
                 .ok_or_else(|| anyhow!("file not found: {}", path.display())),
             FsRequest::Write { path, content } => {
-                files.insert(path, content);
+                let _prev = files.insert(path, content);
                 Ok(FsResult::Written)
             }
             FsRequest::Exists { path } => Ok(FsResult::Exists(files.contains_key(&path))),
             FsRequest::Remove { path } => {
-                files.remove(&path);
+                let _prev = files.remove(&path);
                 Ok(FsResult::Removed)
             }
             FsRequest::ListDir { path } => {

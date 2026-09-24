@@ -75,6 +75,11 @@ pub struct MockLlm {
     requests: Mutex<Vec<LlmRequest>>,
 }
 
+// A poisoned lock means some other thread's test already panicked. The
+// critical sections only run single atomic collection ops (push / insert /
+// pop / clone / len) — nothing panics while holding the lock and the data
+// stays structurally valid — so recover it and let the failing test report
+// itself instead of raising a confusing secondary panic.
 impl MockLlm {
     pub fn new(responses: Vec<String>) -> Self {
         Self {
@@ -83,22 +88,29 @@ impl MockLlm {
         }
     }
 
+    /// Returns every request this mock received, in order.
     pub fn requests(&self) -> Vec<LlmRequest> {
-        self.requests.lock().unwrap().clone()
+        self.requests.lock()
+            .unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// Returns the number of queued responses not yet consumed.
     pub fn remaining(&self) -> usize {
-        self.responses.lock().unwrap().len()
+        self.responses.lock()
+            .unwrap_or_else(|e| e.into_inner()).len()
     }
 }
 
 #[async_trait]
 impl IOProvider<LlmRequest, String> for MockLlm {
     async fn invoke(&self, input: LlmRequest) -> Result<String> {
-        self.requests.lock().unwrap().push(input);
+        self.requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(input);
         self.responses
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .pop_front()
             .ok_or_else(|| anyhow!("MockLlm exhausted"))
     }
@@ -108,8 +120,11 @@ impl Fuzz<LlmRequest, String> for MockLlm {
     /// Generates a plausible LLM response based on the request.
     /// If responses are still queued, returns the next one.
     /// Otherwise generates a response that's plausible for the conversation context.
-    fn fuzz(&self, input: &LlmRequest, u: &mut arbitrary::Unstructured) -> String {
-        if let Some(resp) = self.responses.lock().unwrap().pop_front() {
+    fn fuzz(&self, input: &LlmRequest, u: &mut arbitrary::Unstructured<'_>) -> String {
+        if let Some(resp) =
+            self.responses.lock()
+            .unwrap_or_else(|e| e.into_inner()).pop_front()
+        {
             return resp;
         }
 

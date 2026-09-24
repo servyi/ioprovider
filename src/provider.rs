@@ -24,7 +24,7 @@ pub trait IOProvider<I, O>: Send + Sync {
 /// Uses `arbitrary::Unstructured` (same backend as `cargo-fuzz`) as the
 /// random data source.
 pub trait Fuzz<I, O>: Send + Sync {
-    fn fuzz(&self, input: &I, u: &mut Unstructured) -> O;
+    fn fuzz(&self, input: &I, u: &mut Unstructured<'_>) -> O;
 }
 
 /// Owned fuzz byte buffer with a live read cursor.
@@ -79,7 +79,7 @@ impl FuzzData {
 
     /// Run `f` against an [`Unstructured`] view of the unconsumed tail,
     /// advancing the cursor by exactly the number of bytes `f` consumes.
-    pub fn draw<O>(&mut self, f: impl FnOnce(&mut Unstructured) -> O) -> O {
+    pub fn draw<O>(&mut self, f: impl FnOnce(&mut Unstructured<'_>) -> O) -> O {
         let before = self.remaining();
         let (out, consumed) = {
             let mut u = Unstructured::new(&self.data[self.pos..]);
@@ -184,7 +184,13 @@ where
     O: Send + 'static,
 {
     async fn invoke(&self, input: I) -> Result<O> {
-        let mut guard = self.stream.lock().unwrap();
+        // A poisoned lock means the fuzz closure panicked mid-draw in some
+        // other test. The stream is a byte cursor whose draw only advances
+        // a single position usize, so it cannot be left structurally
+        // broken — later draws in this (already failing) run simply
+        // continue from wherever the cursor stopped.
+        let mut guard = self.stream.lock()
+            .unwrap_or_else(|e| e.into_inner());
         Ok(guard.draw(|u| self.fuzz.fuzz(&input, u)))
     }
 }

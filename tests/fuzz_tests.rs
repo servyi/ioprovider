@@ -1,3 +1,8 @@
+//! Integration tests exercise the mocks through a real async runtime.
+//! A panic here IS the test failure signal, so `unwrap` is acceptable in
+//! this file only (see servyi-lints.toml).
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 use servyi_ioprovider::{
     Fuzz, IOProvider, FuzzProvider,
     command::CommandRequest,
@@ -64,7 +69,7 @@ fn test_fuzz_solver_outcomes() {
             out == "unsat" || out == "sat" || out == "unknown",
             "z3 should return sat/unsat/unknown, got: {out}"
         );
-        outcomes.insert(out.to_string());
+        let _new = outcomes.insert(out.to_string());
     }
     assert!(outcomes.len() >= 2, "should produce multiple outcomes");
 }
@@ -126,7 +131,7 @@ fn test_stream_cursor_advances() {
         model: "test".into(),
         messages: vec![LlmMessage::user("Produce SMT-LIB2 formulas in smt2 blocks")],
     };
-    rt.block_on(llm.invoke(req)).unwrap();
+    let _response = rt.block_on(llm.invoke(req)).unwrap();
     let pos_after_llm = stream.lock().unwrap().pos();
     assert!(pos_after_llm > 0, "cursor must advance after an invoke");
 
@@ -136,7 +141,7 @@ fn test_stream_cursor_advances() {
         stdin: Some("(check-sat)".into()),
         working_dir: None,
     };
-    rt.block_on(cmd.invoke(creq)).unwrap();
+    let _result = rt.block_on(cmd.invoke(creq)).unwrap();
     let pos_after_cmd = stream.lock().unwrap().pos();
     assert!(
         pos_after_cmd > pos_after_llm,

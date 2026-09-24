@@ -58,6 +58,11 @@ pub struct MockCommand {
     inputs: Arc<Mutex<Vec<CommandRequest>>>,
 }
 
+// A poisoned lock means some other thread's test already panicked. The
+// critical sections only run single atomic collection ops (push / insert /
+// pop / clone / len) — nothing panics while holding the lock and the data
+// stays structurally valid — so recover it and let the failing test report
+// itself instead of raising a confusing secondary panic.
 impl MockCommand {
     pub fn new() -> Self {
         Self {
@@ -71,14 +76,16 @@ impl MockCommand {
     pub fn on_program(&mut self, program: &str, result: CommandResult) {
         self.by_program
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .entry(program.to_string())
             .or_default()
             .push_back(result);
     }
 
+    /// Returns every request this mock received, in order.
     pub fn requests(&self) -> Vec<CommandRequest> {
-        self.inputs.lock().unwrap().clone()
+        self.inputs.lock()
+            .unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
@@ -92,17 +99,23 @@ impl Default for MockCommand {
 impl IOProvider<CommandRequest, CommandResult> for MockCommand {
     async fn invoke(&self, input: CommandRequest) -> Result<CommandResult> {
         let program = input.program.clone();
-        self.inputs.lock().unwrap().push(input);
-        let mut map = self.by_program.lock().unwrap();
+        self.inputs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(input);
+        let mut map = self.by_program.lock()
+            .unwrap_or_else(|e| e.into_inner());
         match map.get_mut(&program) {
-            Some(queue) if !queue.is_empty() => Ok(queue.pop_front().unwrap()),
+            Some(queue) if !queue.is_empty() => {
+                Ok(queue.pop_front().expect("queue checked non-empty above"))
+            }
             _ => Err(anyhow!("MockCommand: no response configured for '{program}'")),
         }
     }
 }
 
 impl Fuzz<CommandRequest, CommandResult> for MockCommand {
-    fn fuzz(&self, input: &CommandRequest, u: &mut arbitrary::Unstructured) -> CommandResult {
+    fn fuzz(&self, input: &CommandRequest, u: &mut arbitrary::Unstructured<'_>) -> CommandResult {
         match input.program.as_str() {
             "z3" | "cvc5" | "yices" => {
                 let formula = input.stdin.as_deref().unwrap_or("");
