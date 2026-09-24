@@ -75,6 +75,11 @@ pub struct MockLlm {
     requests: Mutex<Vec<LlmRequest>>,
 }
 
+// A poisoned lock means some other thread's test already panicked. The
+// critical sections only run single atomic collection ops (push / insert /
+// pop / clone / len) — nothing panics while holding the lock and the data
+// stays structurally valid — so recover it and let the failing test report
+// itself instead of raising a confusing secondary panic.
 impl MockLlm {
     pub fn new(responses: Vec<String>) -> Self {
         Self {
@@ -84,16 +89,12 @@ impl MockLlm {
     }
 
     /// Returns every request this mock received, in order.
-    ///
-    /// concurrent user of this mock.
     pub fn requests(&self) -> Vec<LlmRequest> {
         self.requests.lock()
             .unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Returns the number of queued responses not yet consumed.
-    ///
-    /// concurrent user of this mock.
     pub fn remaining(&self) -> usize {
         self.responses.lock()
             .unwrap_or_else(|e| e.into_inner()).len()

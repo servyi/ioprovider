@@ -184,6 +184,11 @@ where
     O: Send + 'static,
 {
     async fn invoke(&self, input: I) -> Result<O> {
+        // A poisoned lock means the fuzz closure panicked mid-draw in some
+        // other test. The stream is a byte cursor whose draw only advances
+        // a single position usize, so it cannot be left structurally
+        // broken — later draws in this (already failing) run simply
+        // continue from wherever the cursor stopped.
         let mut guard = self.stream.lock()
             .unwrap_or_else(|e| e.into_inner());
         Ok(guard.draw(|u| self.fuzz.fuzz(&input, u)))

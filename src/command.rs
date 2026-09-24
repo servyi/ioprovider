@@ -58,6 +58,11 @@ pub struct MockCommand {
     inputs: Arc<Mutex<Vec<CommandRequest>>>,
 }
 
+// A poisoned lock means some other thread's test already panicked. The
+// critical sections only run single atomic collection ops (push / insert /
+// pop / clone / len) — nothing panics while holding the lock and the data
+// stays structurally valid — so recover it and let the failing test report
+// itself instead of raising a confusing secondary panic.
 impl MockCommand {
     pub fn new() -> Self {
         Self {
@@ -68,8 +73,6 @@ impl MockCommand {
 
     /// Configure a response for a given program name.
     /// Multiple calls queue responses in sequence for that program.
-    ///
-    /// concurrent user of this mock.
     pub fn on_program(&mut self, program: &str, result: CommandResult) {
         self.by_program
             .lock()
@@ -80,8 +83,6 @@ impl MockCommand {
     }
 
     /// Returns every request this mock received, in order.
-    ///
-    /// concurrent user of this mock.
     pub fn requests(&self) -> Vec<CommandRequest> {
         self.inputs.lock()
             .unwrap_or_else(|e| e.into_inner()).clone()

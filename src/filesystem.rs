@@ -52,6 +52,11 @@ pub struct MockFileSystem {
     files: Arc<Mutex<HashMap<PathBuf, String>>>,
 }
 
+// A poisoned lock means some other thread's test already panicked. The
+// critical sections only run single atomic collection ops (push / insert /
+// pop / clone / len) — nothing panics while holding the lock and the data
+// stays structurally valid — so recover it and let the failing test report
+// itself instead of raising a confusing secondary panic.
 impl MockFileSystem {
     pub fn new() -> Self {
         Self {
@@ -60,8 +65,6 @@ impl MockFileSystem {
     }
 
     /// Adds or replaces a file in the mock file system.
-    ///
-    /// concurrent user of this mock.
     pub fn insert(&mut self, path: impl Into<PathBuf>, content: impl Into<String>) {
         let _prev = self
             .files
@@ -71,8 +74,6 @@ impl MockFileSystem {
     }
 
     /// Returns the current content of a mocked file.
-    ///
-    /// concurrent user of this mock.
     pub fn get(&self, path: &PathBuf) -> Option<String> {
         self.files.lock()
             .unwrap_or_else(|e| e.into_inner()).get(path).cloned()
