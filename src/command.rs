@@ -18,6 +18,38 @@ pub struct CommandRequest {
     pub working_dir: Option<std::path::PathBuf>,
 }
 
+/// Exit code of a successful command (the OS convention).
+pub const EXIT_SUCCESS: i32 = 0;
+/// Exit code the mocks use for a simulated failure.
+const EXIT_FAILURE: i32 = 1;
+
+/// The SMT `check-sat` query the mock detects in solver stdin.
+pub const SMT_SAT_QUERY: &str = "(check-sat)";
+/// Simulated solver answers, in SMT-LIB spelling.
+pub const SMT_RESP_UNSAT: &str = "unsat\n";
+pub const SMT_RESP_SAT: &str = "sat\n";
+pub const SMT_RESP_UNKNOWN: &str = "unknown\n";
+/// A bare query echoed back, as the solver mock's "output".
+const SMT_RESP_ECHO_QUERY: &str = "(check-sat)\n";
+/// Generic acknowledgment the command mock prints on success.
+const COMMAND_ACK: &str = "ok\n";
+/// Simulated interpreter/mock failure messages.
+const PY_MOCK_ERROR: &str = "SyntaxError";
+const GENERIC_MOCK_ERROR: &str = "error";
+/// Fuzz draw range: a single decimal digit.
+const FUZZ_DIGIT_LOW: u8 = 0;
+const FUZZ_DIGIT_HIGH: u8 = 9;
+/// Fallback draw when the fuzz engine provides nothing.
+const FALLBACK_FUZZ_DRAW: u8 = 0;
+/// Fallback sat-branch when the fuzz engine provides nothing
+/// (middle branch: `unknown`).
+const FALLBACK_SAT_BRANCH: u8 = 5;
+/// Simulated success rates, in tenths: the python mock succeeds 8 in
+/// 10, the generic mock 7 in 10.
+const PY_MOCK_SUCCESS_RATE: u8 = 8;
+const GENERIC_MOCK_SUCCESS_RATE: u8 = 7;
+
+
 /// Result of executing a command.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
@@ -29,7 +61,7 @@ pub struct CommandResult {
 
 impl CommandResult {
     pub fn success(stdout: &str) -> Self {
-        Self { stdout: stdout.to_string(), stderr: String::new(), exit_code: 0 }
+        Self { stdout: stdout.to_string(), stderr: String::new(), exit_code: EXIT_SUCCESS }
     }
 
     pub fn failure(stderr: &str, exit_code: i32) -> Self {
@@ -119,28 +151,28 @@ impl Fuzz<CommandRequest, CommandResult> for MockCommand {
         match input.program.as_str() {
             "z3" | "cvc5" | "yices" => {
                 let formula = input.stdin.as_deref().unwrap_or("");
-                if formula.contains("(check-sat)") {
-                    match u.int_in_range(0u8..=9).unwrap_or(5) {
-                        0..=3 => CommandResult::success("unsat\n"),
-                        4..=6 => CommandResult::success("sat\n"),
-                        _ => CommandResult::success("unknown\n"),
+                if formula.contains(SMT_SAT_QUERY) {
+                    match u.int_in_range(FUZZ_DIGIT_LOW..=FUZZ_DIGIT_HIGH).unwrap_or(FALLBACK_SAT_BRANCH) {
+                        0..=3 => CommandResult::success(SMT_RESP_UNSAT),
+                        4..=6 => CommandResult::success(SMT_RESP_SAT),
+                        _ => CommandResult::success(SMT_RESP_UNKNOWN),
                     }
                 } else {
-                    CommandResult::success("ok\n")
+                    CommandResult::success(COMMAND_ACK)
                 }
             }
             "python3" | "python" => {
-                if u.int_in_range(0u8..=9).unwrap_or(0) < 8 {
-                    CommandResult::success("(check-sat)\n")
+                if u.int_in_range(FUZZ_DIGIT_LOW..=FUZZ_DIGIT_HIGH).unwrap_or(FALLBACK_FUZZ_DRAW) < PY_MOCK_SUCCESS_RATE {
+                    CommandResult::success(SMT_RESP_ECHO_QUERY)
                 } else {
-                    CommandResult::failure("SyntaxError", 1)
+                    CommandResult::failure(PY_MOCK_ERROR, EXIT_FAILURE)
                 }
             }
             _ => {
-                if u.int_in_range(0u8..=9).unwrap_or(0) < 7 {
-                    CommandResult::success("ok\n")
+                if u.int_in_range(FUZZ_DIGIT_LOW..=FUZZ_DIGIT_HIGH).unwrap_or(FALLBACK_FUZZ_DRAW) < GENERIC_MOCK_SUCCESS_RATE {
+                    CommandResult::success(COMMAND_ACK)
                 } else {
-                    CommandResult::failure("error", 1)
+                    CommandResult::failure(GENERIC_MOCK_ERROR, EXIT_FAILURE)
                 }
             }
         }
