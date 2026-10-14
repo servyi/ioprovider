@@ -101,6 +101,31 @@ impl MockLlm {
     }
 }
 
+/// Prompt topics the mock recognizes, and its canned answers.
+const TOPIC_REASONABLE: &str = "reasonable";
+const TOPIC_VERIFY: &str = "verify";
+const TOPIC_SMT: &str = "smt";
+const TOPIC_FORMULA: &str = "formula";
+const TOPIC_SMTLIB: &str = "smtlib";
+const TOPIC_SPLIT: &str = "split";
+const TOPIC_PIECE: &str = "piece";
+pub const VERDICT_REASONABLE: &str = "REASONABLE";
+const VERDICT_IMPRECISE: &str = "The verification has issues with formula precision.";
+/// Canned SMT-LIB formulas of increasing shape.
+const SMT_FORMULA_ONE_BOUND: &str =
+    "(set-logic ALL)\n(declare-const x Int)\n(assert (> x 0))\n(check-sat)\n";
+const SMT_FORMULA_TWO_BOUNDS: &str =
+    "(set-logic ALL)\n(declare-const x Int)\n(assert (and (> x 0) (< x 100)))\n(check-sat)\n";
+const SMT_FORMULA_BARE_QUERY: &str = "(set-logic ALL)\n(check-sat)\n";
+/// Canned split-hint the mock answers for the split topics.
+const MOCK_SPLIT_HINT: &str =
+    "// Start point: test.rs:1\n// Handover point: test.rs:5\nreturn;\n";
+/// Length range of the random fallback fill, and its default.
+const RANDOM_FILL_MIN_BYTES: usize = 0;
+const RANDOM_FILL_MAX_BYTES: usize = 200;
+const DEFAULT_RANDOM_FILL_BYTES: usize = 50;
+
+
 #[async_trait]
 impl IOProvider<LlmRequest, String> for MockLlm {
     async fn invoke(&self, input: LlmRequest) -> Result<String> {
@@ -135,24 +160,27 @@ impl Fuzz<LlmRequest, String> for MockLlm {
             .unwrap_or("");
 
         let lower = last_user.to_lowercase();
-        if lower.contains("reasonable") || lower.contains("verify") {
+
+        if lower.contains(TOPIC_REASONABLE) || lower.contains(TOPIC_VERIFY) {
             if u.arbitrary().unwrap_or(true) {
-                "REASONABLE".to_string()
+                VERDICT_REASONABLE.to_string()
             } else {
-                "The verification has issues with formula precision.".to_string()
+                VERDICT_IMPRECISE.to_string()
             }
-        } else if lower.contains("smt") || lower.contains("formula") || lower.contains("smtlib") {
+        } else if lower.contains(TOPIC_SMT) || lower.contains(TOPIC_FORMULA) || lower.contains(TOPIC_SMTLIB) {
             let formulas = [
-                "(set-logic ALL)\n(declare-const x Int)\n(assert (> x 0))\n(check-sat)\n",
-                "(set-logic ALL)\n(declare-const x Int)\n(assert (and (> x 0) (< x 100)))\n(check-sat)\n",
-                "(set-logic ALL)\n(check-sat)\n",
+                SMT_FORMULA_ONE_BOUND,
+                SMT_FORMULA_TWO_BOUNDS,
+                SMT_FORMULA_BARE_QUERY,
             ];
             let idx = u.int_in_range(0..=formulas.len() - 1).unwrap_or(0);
             format!("```\n{}\n```", formulas[idx])
-        } else if lower.contains("split") || lower.contains("piece") {
-            "// Start point: test.rs:1\n// Handover point: test.rs:5\nreturn;\n".to_string()
+        } else if lower.contains(TOPIC_SPLIT) || lower.contains(TOPIC_PIECE) {
+            MOCK_SPLIT_HINT.to_string()
         } else {
-            let len = u.int_in_range(0..=200usize).unwrap_or(50);
+            let len = u
+                .int_in_range(RANDOM_FILL_MIN_BYTES..=RANDOM_FILL_MAX_BYTES)
+                .unwrap_or(DEFAULT_RANDOM_FILL_BYTES);
             let bytes = u.bytes(len).unwrap_or(&[]);
             String::from_utf8_lossy(bytes).to_string()
         }

@@ -80,6 +80,11 @@ impl MockFileSystem {
     }
 }
 
+/// Size cap of a mock file's random content.
+const MOCK_FILE_MAX_BYTES: usize = 100;
+/// Content the mock serves for reads of missing files.
+const MOCK_NOT_FOUND_CONTENT: &str = "// file not found";
+
 impl Fuzz<FsRequest, FsResult> for MockFileSystem {
     fn fuzz(&self, input: &FsRequest, u: &mut arbitrary::Unstructured<'_>) -> FsResult {
         match input {
@@ -89,10 +94,10 @@ impl Fuzz<FsRequest, FsResult> for MockFileSystem {
                 if let Some(content) = files.get(path) {
                     FsResult::Content(content.clone())
                 } else if u.arbitrary().unwrap_or(true) {
-                    let bytes = u.bytes(100).unwrap_or(&[]);
+                    let bytes = u.bytes(MOCK_FILE_MAX_BYTES).unwrap_or(&[]);
                     FsResult::Content(String::from_utf8_lossy(bytes).to_string())
                 } else {
-                    FsResult::Content("// file not found".to_string())
+                    FsResult::Content(MOCK_NOT_FOUND_CONTENT.to_string())
                 }
             }
             FsRequest::Write { .. } => FsResult::Written,
