@@ -2,7 +2,6 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -76,15 +75,13 @@ impl CommandResult {
 /// ```
 /// use servyi_ioprovider::{MockCommand, IOProvider, command::{CommandRequest, CommandResult}};
 ///
-/// # tokio_test::block_on(async {
-/// let mut mock = MockCommand::new();
+/// /// let mut mock = MockCommand::new();
 /// mock.on_program("z3", CommandResult::success("unsat\n"));
 ///
 /// let req = CommandRequest { program: "z3".into(), args: vec![], stdin: None, working_dir: None };
-/// let result = mock.invoke(req).await.unwrap();
+/// let result = mock.invoke(req).unwrap();
 /// assert_eq!(result.stdout, "unsat\n");
-/// # });
-/// ```
+/// /// ```
 pub struct MockCommand {
     by_program: Arc<Mutex<HashMap<String, VecDeque<CommandResult>>>>,
     inputs: Arc<Mutex<Vec<CommandRequest>>>,
@@ -127,9 +124,8 @@ impl Default for MockCommand {
     }
 }
 
-#[async_trait]
 impl IOProvider<CommandRequest, CommandResult> for MockCommand {
-    async fn invoke(&self, input: CommandRequest) -> Result<CommandResult> {
+    fn invoke(&self, input: CommandRequest) -> Result<CommandResult> {
         let program = input.program.clone();
         self.inputs
             .lock()

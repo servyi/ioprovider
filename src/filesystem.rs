@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -39,15 +38,13 @@ pub enum FsResult {
 /// use servyi_ioprovider::{MockFileSystem, IOProvider, filesystem::{FsRequest, FsResult}};
 /// use std::path::PathBuf;
 ///
-/// # tokio_test::block_on(async {
-/// let mut fs = MockFileSystem::new();
+/// /// let mut fs = MockFileSystem::new();
 /// fs.insert("/test/file.txt", "hello world");
 ///
 /// let req = FsRequest::Read { path: PathBuf::from("/test/file.txt") };
-/// let result = fs.invoke(req).await.unwrap();
+/// let result = fs.invoke(req).unwrap();
 /// assert_eq!(result, FsResult::Content("hello world".into()));
-/// # });
-/// ```
+/// /// ```
 pub struct MockFileSystem {
     files: Arc<Mutex<HashMap<PathBuf, String>>>,
 }
@@ -114,9 +111,8 @@ impl Default for MockFileSystem {
     }
 }
 
-#[async_trait]
 impl IOProvider<FsRequest, FsResult> for MockFileSystem {
-    async fn invoke(&self, input: FsRequest) -> Result<FsResult> {
+    fn invoke(&self, input: FsRequest) -> Result<FsResult> {
         let mut files = self.files.lock()
             .unwrap_or_else(|e| e.into_inner());
         match input {

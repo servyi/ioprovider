@@ -1,4 +1,4 @@
-//! Integration tests exercise the mocks through a real async runtime.
+//! Integration tests exercise the mocks directly (sync invoke).
 //! A panic here IS the test failure signal, so `unwrap` is acceptable in
 //! this file only (see servyi-lints.toml).
 #![cfg_attr(test, allow(clippy::unwrap_used))]
@@ -152,8 +152,7 @@ fn test_fuzz_provider_drop_in() {
         messages: vec![LlmMessage::user(SANITY_PROMPT_TEXT)],
     };
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let response = rt.block_on(provider.invoke(req)).unwrap();
+    let response = (provider.invoke(req)).unwrap();
     assert!(!response.is_empty());
 }
 
@@ -162,7 +161,6 @@ fn test_stream_cursor_advances() {
     use servyi_ioprovider::FuzzData;
     use std::sync::Arc;
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
 
     let stream: Arc<std::sync::Mutex<FuzzData>> = servyi_ioprovider::fuzz_stream_from_seed(SHARED_STREAM_SEED);
     let llm = FuzzProvider::with_stream(MockLlm::new(vec![]), Arc::clone(&stream));
@@ -172,7 +170,7 @@ fn test_stream_cursor_advances() {
         model: TEST_MODEL_NAME.into(),
         messages: vec![LlmMessage::user(FORMALIZER_PROMPT_TEXT)],
     };
-    let _response = rt.block_on(llm.invoke(req)).unwrap();
+    let _response = (llm.invoke(req)).unwrap();
     let pos_after_llm = stream.lock().unwrap().pos();
     assert!(pos_after_llm > FIRST_SEED as usize, "cursor must advance after an invoke");
 
@@ -182,7 +180,7 @@ fn test_stream_cursor_advances() {
         stdin: Some(SMT_SAT_QUERY.into()),
         working_dir: None,
     };
-    let _result = rt.block_on(cmd.invoke(creq)).unwrap();
+    let _result = (cmd.invoke(creq)).unwrap();
     let pos_after_cmd = stream.lock().unwrap().pos();
     assert!(
         pos_after_cmd > pos_after_llm,

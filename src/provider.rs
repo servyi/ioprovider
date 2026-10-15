@@ -3,15 +3,14 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use arbitrary::Unstructured;
-use async_trait::async_trait;
 
 /// The core trait: a provider that takes input `I` and produces output `O`.
 ///
 /// All providers are `Send + Sync` so they can be shared across threads.
-/// The `invoke` method is async to support network/subprocess-backed providers.
-#[async_trait]
+/// The `invoke` method is blocking; network/subprocess-backed providers
+/// run their IO on the calling thread (thread-per-subtask model).
 pub trait IOProvider<I, O>: Send + Sync {
-    async fn invoke(&self, input: I) -> Result<O>;
+    fn invoke(&self, input: I) -> Result<O>;
 }
 
 /// Trait for generating realistic fake outputs for fuzzing state machines.
@@ -141,8 +140,7 @@ pub fn fuzz_stream_from_bytes(bytes: Vec<u8>) -> Arc<Mutex<FuzzData>> {
 ///     llm::{LlmRequest, LlmMessage},
 /// };
 ///
-/// # tokio_test::block_on(async {
-/// // Several providers can share one fuzz stream by cloning the Arc:
+/// /// // Several providers can share one fuzz stream by cloning the Arc:
 /// let stream = fuzz_stream_from_seed(42);
 /// let llm = FuzzProvider::with_stream(MockLlm::new(vec![]), Arc::clone(&stream));
 ///
@@ -151,10 +149,9 @@ pub fn fuzz_stream_from_bytes(bytes: Vec<u8>) -> Arc<Mutex<FuzzData>> {
 ///     messages: vec![LlmMessage::user("Is this REASONABLE?")],
 /// };
 /// // provider implements IOProvider<LlmRequest, String> — drop-in replacement
-/// let response = llm.invoke(req).await.unwrap();
+/// let response = llm.invoke(req).unwrap();
 /// assert!(!response.is_empty());
-/// # });
-/// ```
+/// /// ```
 pub struct FuzzProvider<F, I, O> {
     fuzz: F,
     stream: Arc<Mutex<FuzzData>>,
@@ -192,14 +189,13 @@ where
     }
 }
 
-#[async_trait]
 impl<F, I, O> IOProvider<I, O> for FuzzProvider<F, I, O>
 where
     F: Fuzz<I, O>,
     I: Send + Sync + 'static,
     O: Send + 'static,
 {
-    async fn invoke(&self, input: I) -> Result<O> {
+    fn invoke(&self, input: I) -> Result<O> {
         // A poisoned lock means the fuzz closure panicked mid-draw in some
         // other test. The stream is a byte cursor whose draw only advances
         // a single position usize, so it cannot be left structurally

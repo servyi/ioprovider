@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -60,16 +59,14 @@ pub struct LlmRequest {
 /// ```
 /// use servyi_ioprovider::{MockLlm, IOProvider, llm::{LlmRequest, LlmMessage}};
 ///
-/// # tokio_test::block_on(async {
-/// let llm = MockLlm::new(vec!["Hello!".into(), "Goodbye!".into()]);
+/// /// let llm = MockLlm::new(vec!["Hello!".into(), "Goodbye!".into()]);
 /// let req = LlmRequest {
 ///     model: "test".into(),
 ///     messages: vec![LlmMessage::user("hi")],
 /// };
-/// assert_eq!(llm.invoke(req.clone()).await.unwrap(), "Hello!");
-/// assert_eq!(llm.invoke(req).await.unwrap(), "Goodbye!");
-/// # });
-/// ```
+/// assert_eq!(llm.invoke(req.clone()).unwrap(), "Hello!");
+/// assert_eq!(llm.invoke(req).unwrap(), "Goodbye!");
+/// /// ```
 pub struct MockLlm {
     responses: Mutex<VecDeque<String>>,
     requests: Mutex<Vec<LlmRequest>>,
@@ -126,9 +123,8 @@ const RANDOM_FILL_MAX_BYTES: usize = 200;
 const DEFAULT_RANDOM_FILL_BYTES: usize = 50;
 
 
-#[async_trait]
 impl IOProvider<LlmRequest, String> for MockLlm {
-    async fn invoke(&self, input: LlmRequest) -> Result<String> {
+    fn invoke(&self, input: LlmRequest) -> Result<String> {
         self.requests
             .lock()
             .unwrap_or_else(|e| e.into_inner())
